@@ -27,6 +27,10 @@ int main(){
     if(init_config()){
         err_quit("%s[%d]:can't set configure file",__FILE__,__LINE__);
     }
+    while(1){
+
+    }
+    exit(0);
 }
 
 void init_daemon(){
@@ -58,24 +62,15 @@ void init_daemon(){
     
     if(chdir("/")<0)
         err_quit("%s[%d]:can't change directory to /");
-    
     if(rl.rlim_max==RLIM_INFINITY)
         rl.rlim_max=1024;
     for(i=0;i<rl.rlim_max;i++)
         close(i);
 
-    fd0=open("/dev/NULL",O_RDWR);
-    fd1=dup(0);
-    fd2=dup(0);
-
     openlog(__FILE__,LOG_CONS,LOG_DAEMON);
-    if(fd0!=0||fd1!=1||fd2!=2){
-        syslog(LOG_ERR,"unexpected file descriptors %d %d %d",fd0,fd1,fd2);
-        exit(1);
-    }
 }
 
-#define LOCKFILE "/var/run/everyfile.pid"
+#define LOCKFILE "/var/run/everyfiled.pid"
 #define LOCKMODE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
 
 int init_lockfile(){
