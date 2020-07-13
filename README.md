@@ -1,2 +1,2 @@
 # everyfile
-hello fucking world!
+hello amusing world!
