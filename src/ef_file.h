@@ -15,14 +15,17 @@
     #include "os/linux/_file.h"
 #endif
 
+typedef _file_info          file_info;
+typedef _file_type          file_type;
+
 class ef_file:public _file{
-    typedef __no_lock_queue_with_CAS _file_info_buf;
+    typedef __no_lock_queue_with_CAS<file_info> file_info_buf;
     public:
         ef_file(_file_info_buf &_buf);
         ~ef_file();
-        int                 add_file_info();
+        virtual int          add_file_info(file_info &&_msg);
     private:
-        _file_info_buf      &buf;
+        file_info_buf      &buf;
 };
 
 #endif
