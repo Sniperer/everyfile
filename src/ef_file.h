@@ -9,21 +9,19 @@
 #include <cstring>
 
 #include "datastruct/__no_lock_queue_with_CAS.h"
-#include "../ef_err.h"
+#include "ef_err.h"
+#include "ef_debug.h"
+#include "os/linux/_file.h"
 
-#ifdef linux
-    #include "os/linux/_file.h"
-#endif
-
-typedef _file_info          file_info;
-typedef _file_type          file_type;
+typedef _file_info                              file_info;
+typedef _file_type                              file_type;
+typedef __no_lock_queue_with_CAS<file_info>     file_info_buf;
 
 class ef_file:public _file{
-    typedef __no_lock_queue_with_CAS<file_info> file_info_buf;
     public:
-        ef_file(_file_info_buf &_buf);
+        ef_file(file_info_buf &_buf);
         ~ef_file();
-        virtual int          add_file_info(file_info &&_msg);
+        void         add_file_info(file_info &_info);
     private:
         file_info_buf      &buf;
 };
