@@ -1,6 +1,6 @@
 CC = g++
 CFLAGS = -std=c++11 -D DEBUG
-LIBS = -lpthread -latomic
+LIBS = -lpthread -latomic -lsqlite3
 DIR_OBJS = obj
 DIR_BIN = bin
 DIR_SRC = src
