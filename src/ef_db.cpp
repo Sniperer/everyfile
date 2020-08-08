@@ -20,7 +20,7 @@ void ef_db::destory_instance(){
         delete _instance;
         _instance=NULL;
     }
-    pthread_mutex_trylock(&destory_mutex);
+    pthread_mutex_unlock(&destory_mutex);
 }
 
 sqlite3pp::database& ef_db::get_db(){

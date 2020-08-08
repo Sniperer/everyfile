@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/lib/gcc/x86_64-pc-linux-gnu/8.1.0/include/ssp",
+                "/usr/include/linux"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/local/bin/g++",
+            "cStandard": "c11",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "gcc-x86"
+        }
+    ],
+    "version": 4
+}
