@@ -79,7 +79,7 @@ static struct kprobe kp = {
  *	判断文件系统挂载位置是否特殊，对于特殊的位置，不将其输出。
  */
 static int mounted_at(const char *mp, const char *root){
-	return strcmp(mp,root)==0||(strlen(mp)>strlen(root)&&strstr(mp, root)==mp&&mp[strlen(root)]==/'');
+	return strcmp(mp,root)==0||(strlen(mp)>strlen(root)&&strstr(mp, root)==mp&&mp[strlen(root)]=='/');
 }
 
 int is_special_mp(const char *mp){
@@ -110,6 +110,45 @@ void __init parse_mounts_info(char *buf, struct list_head *parts){
 		list_add_tail(&part->list, parts);
 	}
 }
+
+/*
+ * 封装了kernel读文件.4kB一分配,与linux page size一致。
+ */
+#define ALLOC_UNIT (1<<12)
+
+char* __init read_file_content(const char *filename, int *real_size){
+	struct file *filp = filp_open(filename, O_RDONLY,0);
+	if(IS_ERR(filp)){
+		pr_err("error opening %s\n", filename);
+		return 0;
+	}
+	mm_segment_t old_fs=get_fs();
+
+	char *buf=0;
+	int size=ALLOC_UNIT;
+	*real_size=0;
+	while(1){
+		buf=kmalloc(size, GFP_KERNEL);
+		if(unlikely(buf==0))
+			break;
+		loff_t off=0;
+		char __user *user_buf=(char __user*)buf;
+		*real_size=filp->f_op->read(filp, user_buf, size, &off);
+		if(*real_size>0&&*real_size<size){
+			buf[*real_size]=0;
+			break;
+		}
+
+		real_size+=ALLOC_UNIT;
+		kfree(buf);
+
+	}
+	set_fs(old_fs);
+	filp_close(filp, 0);
+	pr_info("%s size: %d\n",filename,*real_size);
+	return buf;
+}
+
 
 /* kprobe pre_handler: called just before the probed instruction is executed */
 static int handler_pre(struct kprobe *p, struct pt_regs *regs)
@@ -170,7 +209,7 @@ static void __init init_mounts_info(void){
 	int size=0;
 	char* buf=read_file_content("/proc/self/mountinfo", &size);
 
-	parse_mount_info(buf, &partitions);
+	parse_mounts_info(buf, &partitions);
 	list_for_each_entry(part, &partitions, list){
 		parts_count++;
 		pr_info("mp: %s, major: %d, minor: %d\n",part->root,part->major,part->minor);
