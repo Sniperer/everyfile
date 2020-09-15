@@ -1,3 +1,4 @@
+/*
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/kprobes.h>
@@ -61,3 +62,4 @@ static void __exit kprobe_exit(void){
 }
 
 module_init(kprobe_init);
+*/

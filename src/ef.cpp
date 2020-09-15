@@ -1,3 +1,4 @@
+/*
 #include "ef.h"
 
 void *fileio_in_buf(void *arg){
@@ -67,3 +68,5 @@ void ef::reset(){
 void ef::search(){
 
 }
+
+*/

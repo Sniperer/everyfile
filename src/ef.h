@@ -1,3 +1,4 @@
+/*
 #ifndef _EF_H
 #define _EF_H
 
@@ -23,3 +24,5 @@ class ef{
 };
 
 #endif
+
+*/
