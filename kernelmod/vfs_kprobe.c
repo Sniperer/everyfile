@@ -71,8 +71,8 @@ static LIST_HEAD(msg_buf);
 static DEFINE_SPINLOCK(sl_file);
 static unsigned int file_on = 0;
 static unsigned int msg_buf_size = 0;
-DEFINE_SPINLOCK(sl_msg);
-static unsigned int	msg_ready = 0;
+static DEFINE_SPINLOCK(sl_msg);
+static unsigned int	msg_ready = 0; 
 static struct		task_struct *send_kthread;
 
 /*
@@ -80,14 +80,17 @@ static struct		task_struct *send_kthread;
  *	内核发送报文触发回调函数，发送vfs信息。
  *	
  */
-struct sock *nlsk = NULL;
-extern struct net = init_net;
+struct sock			*nlsk = NULL;
+extern struct net	init_net;
+struct file			*fp = NULL;
+loff_t				pos = 0;
 
 int send_msg(nl_msg *_msg){
 	struct sk_buff	*nl_skb;
 	struct nlmsghdr *nlh;
 	int8_t			ret;
 	char			*_flag;
+	pr_info("send %ld to user.\n", _msg->len);
 	nl_skb = nlmsg_new(_msg->len+2, GFP_ATOMIC);
 	if(!nl_skb){
 		printk("netlink alloc failtrue.\n");
@@ -107,7 +110,25 @@ int send_msg(nl_msg *_msg){
 	memcpy(nlmsg_data(nlh)+2, _msg->path, _msg->len);
 	ret = netlink_unicast(nlsk, nl_skb, USER_PORT, MSG_DONTWAIT);
 	printk("netlink_unicast %d.\n", ret);
-	kfree(_flag);
+	//kfree(_flag);
+	//kfree_skb(nl_skb);
+	return ret;
+}
+
+int send_file_on(void){
+	struct sk_buff		*nl_skb;
+	struct nlmsghdr		*nlh;
+	int8_t				ret;
+	char				*msg;
+	nl_skb = nlmsg_new(sizeof(loff_t)+8, GFP_ATOMIC);
+	if(!nl_skb){
+		printk("nlmsg_put failtrue.\n");
+		nlmsg_free(nl_skb);
+		return -1;
+	}
+	sprintf(msg, "FILEON%lld", pos);
+	memcpy(nlmsg_data(nlh), msg, sizeof(loff_t)+8);
+	ret = netlink_unicast(nlsk, nl_skb, USER_PORT, MSG_DONTWAIT);
 	return ret;
 }
 
@@ -121,6 +142,9 @@ static void rcv_msg(struct sk_buff *skb){
 		if(umsg){
 			printk("kernel recv from user: %s.\n", umsg);
 			//开启发送线程
+			spin_lock(&sl_msg);
+			msg_ready++;
+			spin_unlock(&sl_msg);
 			if(strcmp(umsg, "SYN") == 0){
 				wake_up_process(send_kthread);
 			}
@@ -129,6 +153,8 @@ static void rcv_msg(struct sk_buff *skb){
 			}
 		}
 	}
+
+	//kfree_skb(skb);
 }
 
 struct netlink_kernel_cfg cfg = {
@@ -155,50 +181,62 @@ unsigned long get_arg(struct pt_regs* regs, int n){
 }
 
 /*
- *	调用之前必须锁定sl_file。
- */
-static int get_msg_from_file(){
-
-}
-
-/*
  *	调用之前必须锁定sl_buf。
  */
-static inline void get_msg_from_list(nl_msg *_msg){
-	_msg = (struct list_head *)msg_buf->next;
-	list_del(_msg);
-	_msg = (nl_msg *)_msg;
+static inline void *get_msg_from_list(void){
+	if(msg_buf.next == &msg_buf)
+		return NULL;
+	else 
+		return (void *)msg_buf.next;
 }
 
 int send_func(void *data){
+	/*
+	 *  由dameon持续发送ACK包，如果没有可用消息，则不进行回复，dameon等待超时，重复。
+	 *  kernel查找可用消息，通过msg_buf和fileon状态，如果file_on状态打开，文件内有消息，否则，查询msg_buf_size.
+	 *	@msg_ready: 线程周期唤醒，通过其标识是否受到ack包产生异步回调，若是继续执行，否则让出CPU.
+	 *	@msg_buf_size: 控制消息缓冲区的大小，每次发送信息从缓冲区减少，先判断file_on，再判断msg_buf_size
+	 */
 	nl_msg *msg;
 	while(1){
 		set_current_state(TASK_INTERRUPTIBLE);
 		msg = (void *)NULL;
 		if(kthread_should_stop()) break;
 		spin_lock(&sl_msg);
-		if(msg_ready == 0){
+		if(msg_ready){
+			msg_ready = 0;
+		}
+		else{
 			spin_unlock(&sl_msg);
-			schedule_timeout(20*HZ);
+			schedule_timeout(10*HZ);
+		}
+		spin_unlock(&sl_msg);
+		spin_lock(&sl_file);
+		pr_info("get sl_file mutex lock.\n");
+		if(file_on){
+			send_file_on();
+			pos = 0;
+			file_on = 0;
 		}
 		else {
-			msg_ready--;
-			spin_unlock(&sl_msg);
 			spin_lock(&sl_buf);
+			pr_info("get sl_buf mutex lock.\n");
 			if(msg_buf_size > 0){
-				spin_lock(sl_file);
-				if(file_on) {
-					get_msg_from_file();
-				}
-				else {
-					get_msg_from_list(msg);
-					if(msg != NULL)
-						send_msg(msg);
-					kfree(msg);
-				}
+				/*	如果可用消息数不为空,发送头消息.
+				 *
+				 */
+				msg = (nl_msg *)get_msg_from_list();
+				if(msg != NULL){
+					printk("NULL msg.\n");
+					send_msg(msg);
+					list_del(&msg->list);
+					msg_buf_size--;
+					//kfree(msg);
+				}		
 			}
 			spin_unlock(&sl_buf);
-		}
+		}	
+		spin_unlock(&sl_file);
 	}
 	return 0;
 }
@@ -207,8 +245,26 @@ int send_func(void *data){
 #define MAX_MSG_BUF_LEN 128
 #define SYS_CALL_NUM    7
 
-static void add_msg_to_file(){
-
+/*
+ *	调用前必须获取sl_buf锁。
+ */
+static void add_msg_to_file(void){
+	nl_msg *msg;
+	mm_segment_t old_fs;
+	char *buf;
+	msg = (nl_msg *)get_msg_from_list();
+	if(msg != NULL){
+		list_del(&msg->list);
+		msg_buf_size--;
+	}
+	buf = (char *)kmalloc(2+msg->len, GFP_KERNEL);
+	*buf = (msg->flags%10+'0');
+	*(buf+1) = ' ';
+	memcpy(buf+2, msg->path, msg->len);
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	kernel_write(fp, buf, 2+msg->len, &pos);
+	set_fs(old_fs);
 }
 
 static int add_vfs_changed(char *fl_path, uint16_t path_len, unsigned long flags){
@@ -219,17 +275,13 @@ static int add_vfs_changed(char *fl_path, uint16_t path_len, unsigned long flags
 	msg->len = path_len;
 	memcpy(msg->path, fl_path, path_len);
 	spin_lock(&sl_buf);
-	list_add_tail(&msg->list, msg_buf);
+	list_add_tail(&msg->list, &msg_buf);
 	msg_buf_size++;
 	if(msg_buf_size > MAX_MSG_BUF_LEN){
-		return 1;
-/*
 		add_msg_to_file();
 		spin_lock(&sl_file);
 		file_on = 1;
 		spin_unlock(&sl_file);
-		msg_buf_size--;
-*/
 	}
 	spin_unlock(&sl_buf);
 	return 0;
@@ -267,8 +319,11 @@ static int pre_handler_common(struct kprobe* p, struct pt_regs *regs){
 	return 0;
 }
 
+static int mounted_at(const char *, const char *);
+int is_special_mp(const char *);
+
 static void post_handler_common(struct kprobe* p, struct pt_regs *regs, unsigned long flags){
-	unsigned int	ret_val = 0;
+	unsigned int	len, ret_val = 0;
 	char			root[NAME_MAX], *fl_path;
 	krp_entry		*entry;
 	vfs_op_args		*args;
@@ -285,15 +340,23 @@ static void post_handler_common(struct kprobe* p, struct pt_regs *regs, unsigned
 	get_root(root, args->major, args->minor);
 	if(*root==0)
 		return ;
+	if(is_special_mp(root))
+		return ;
 	pr_info("args->path %s%s OK in proc[%d]: %s\n", root, args->path, current->pid, current->comm);
-	fl_path = (char *)kmalloc(strlen(root)+strlen(args->path)+1, GFP_KERNEL);
-	if(fl_path == NULL){
-		printk("kamlloc failed.\n");
-		return;
+	if(mounted_at(root, "/")){
+		fl_path = (char *)kmalloc(strlen(args->path), GFP_KERNEL);
+		if(fl_path == NULL) return ;
+		memcpy(fl_path, args->path, strlen(args->path));
+		len = strlen(args->path);
 	}
-	memcpy(fl_path, root, strlen(root));
-	memcpy(fl_path, args->path, strlen(args->path));
-	if(add_vfs_changed(fl_path, strlen(root)+strlen(args->path)+1, flags)){
+	else{
+		fl_path = (char *)kmalloc(strlen(root)+strlen(args->path), GFP_KERNEL);
+		if(fl_path == NULL)	return;
+		memcpy(fl_path, root, strlen(root));
+		memcpy(fl_path+strlen(root), args->path, strlen(args->path));
+		len = strlen(root) + strlen(args->path);
+	}
+	if(add_vfs_changed(fl_path, len, flags)){
 		printk("%s add to buffer error.\n", fl_path);
 	}
 	kfree(fl_path);
@@ -351,7 +414,8 @@ int is_special_mp(const char *mp){
 	if(mp==0||*mp!='/')
 		return 1;
 	return mounted_at(mp,"/sys")||mounted_at(mp, "/proc") ||
-		mounted_at(mp, "/run") || mounted_at(mp, "/dev") || mounted_at(mp, "/var");
+		mounted_at(mp, "/run") || mounted_at(mp, "/dev") || mounted_at(mp, "/var") ||
+		mounted_at(mp, "/tmp");
 }
 
 /*
@@ -458,6 +522,11 @@ static int __init kprobe_init(void)
 {
 	int		ret;
 	init_mounts_info();
+	fp = filp_open("/var/log/everyfile.log", O_RDWR | O_CREAT, 0);
+	if(IS_ERR(fp)){
+		printk("open file error!\n");
+		return -1;
+	}
 	nlsk = (struct sock *)netlink_kernel_create(&init_net, NETLINK_TEST, &cfg);
 	send_kthread = kthread_create(send_func, NULL, "send_kthread");
 	if(nlsk == NULL){
