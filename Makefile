@@ -1,12 +1,12 @@
 CC = g++
-CFLAGS = -std=c++11 -D DEBUG
+CFLAGS = -std=c++11
 LIBS = -lpthread -latomic -lsqlite3
 DIR_OBJS = obj
 DIR_BIN = bin
 DIR_SRC = src
 
 dirs := $(DIR_OBJS) $(DIR_BIN)
-bin = test
+bin = ef
 src = $(wildcard $(DIR_SRC)/*.cpp $(DIR_SRC)/os/linux/*.cpp)
 obj = $(patsubst %.cpp,%.o,$(src))
 

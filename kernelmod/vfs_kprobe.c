@@ -1,13 +1,10 @@
 /*
- * NOTE: This example is works on x86 and powerpc.
- * Here's a sample kernel module showing the use of kprobes to dump a
- * stack trace and selected registers when _do_fork() is called.
+ * This module is works on x86.
  *
  * For more information on theory of operation of kprobes, see
  * Documentation/kprobes.txt
  *
- * You will see the trace data in /var/log/messages and on the console
- * whenever _do_fork() is invoked to create a new process.
+ * You will see the trace data in /var/log/messages.
  * 
  * 0x01: it's neccessary but not agent
  * 0x02: it's not neccessary and not agent
@@ -140,7 +137,7 @@ static void rcv_msg(struct sk_buff *skb){
 		nlh = nlmsg_hdr(skb);
 		umsg = NLMSG_DATA(nlh);
 		if(umsg){
-			printk("kernel recv from user: %s.\n", umsg);
+		//	printk("kernel recv from user: %s.\n", umsg);
 			//开启发送线程
 			spin_lock(&sl_msg);
 			msg_ready++;
@@ -212,7 +209,7 @@ int send_func(void *data){
 		}
 		spin_unlock(&sl_msg);
 		spin_lock(&sl_file);
-		pr_info("get sl_file mutex lock.\n");
+		//pr_info("get sl_file mutex lock.\n");
 		if(file_on){
 			send_file_on();
 			pos = 0;
@@ -220,14 +217,14 @@ int send_func(void *data){
 		}
 		else {
 			spin_lock(&sl_buf);
-			pr_info("get sl_buf mutex lock.\n");
+			//pr_info("get sl_buf mutex lock.\n");
 			if(msg_buf_size > 0){
 				/*	如果可用消息数不为空,发送头消息.
 				 *
 				 */
 				msg = (nl_msg *)get_msg_from_list();
 				if(msg != NULL){
-					printk("NULL msg.\n");
+					//printk("NULL msg.\n");
 					send_msg(msg);
 					list_del(&msg->list);
 					msg_buf_size--;
