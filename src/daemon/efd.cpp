@@ -79,14 +79,14 @@ bool start_daemon(){
 	}
 
 	umask(0);
-	chdir("/");
-
+/*
 	long maxfd;
 	if((maxfd = sysconf(_SC_OPEN_MAX)) != -1){
 		for(fd=0;fd<maxfd;fd++){
 			close(fd);
 		}
 	}
+*/
 
 	fd=open("/dev/null", O_RDWR);
 	if(fd == -1){
@@ -120,7 +120,7 @@ bool start_daemon(){
 }
 
 const ef_db *ef_db::_instance = new ef_db();
-file_info_buf buf;
+//file_info_buf buf;
 
 typedef struct __user_msg_info{
 	struct nlmsghdr hdr;
@@ -138,6 +138,11 @@ void *ef_kernel_conn(void *){
 	fd_set				fdsr;
 	struct timeval		tv;
 
+//	info.file_name="/home/sniper/123";
+//	info.file_time=0;
+//	info.file_type=EREG;
+//	db_instance->add(info);
+
 	skfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_TEST);
 	if(skfd == -1){
 		exit(-1);
@@ -149,6 +154,7 @@ void *ef_kernel_conn(void *){
 	saddr.nl_groups = 0;
 	if(bind(skfd, (struct sockaddr *)&saddr, sizeof(saddr)) != 0){
 		close(skfd);
+		syslog(LOG_ERR, "bind error");
 		exit(-1);
 	}
 
@@ -169,10 +175,12 @@ void *ef_kernel_conn(void *){
 	ret = sendto(skfd, nh, nh->nlmsg_len, 0, (struct sockaddr *)&daddr, sizeof(struct sockaddr_nl));
 	if(!ret){
 		close(skfd);
+		syslog(LOG_ERR, "sendto error");
 		exit(-1);
 	}
 
 	while(1){
+		syslog(LOG_ERR, "select main loop.");
 		FD_ZERO(&fdsr);
 		FD_SET(skfd, &fdsr);
 
@@ -181,10 +189,16 @@ void *ef_kernel_conn(void *){
 
 		ret = select(skfd+1, &fdsr, NULL, NULL, &tv);
 		if(ret < 0){
+			syslog(LOG_ERR, "select error.");
 			break;
 		}
 		else if(ret == 0){
-
+			ret = sendto(skfd, nh, nh->nlmsg_len, 0, (struct sockaddr *)&daddr, sizeof(struct sockaddr_nl));
+			if(!ret){
+				close(skfd);
+				syslog(LOG_ERR, "sendto err.");
+				exit(-1);
+			}
 		}
 		else{
 			if(FD_ISSET(skfd, &fdsr)){
@@ -199,30 +213,38 @@ void *ef_kernel_conn(void *){
 				}
 				//solve msg
 				ret = u_info.msg[0]-'0';
+				gettimeofday(&tv, NULL);
+				syslog(LOG_ERR, "case:%d", ret);
 				switch(ret){
 					//vfs_create
 					case 1:
 						info.file_type=EREG;
-						for(int i=0; i<MSG_LEN && u_info.msg[i]!=NULL; i++)
+						info.file_name="";
+						info.file_time=tv.tv_sec;
+						for(int i=2; i<MSG_LEN && u_info.msg[i]!='\0'; i++)
 							info.file_name+=u_info.msg[i];
 						db_instance->add(info);
 						break;
 					//vfs_unlink
 					case 2:
-						for(int i=0; i<MSG_LEN && u_info.msg[i]!=NULL; i++)
+						info.file_name="";
+						for(int i=2; i<MSG_LEN && u_info.msg[i]!='\0'; i++)
 							info.file_name+=u_info.msg[i];
 						db_instance->rm(info.file_name);
 						break;
 					//vfs_mkdir
 					case 3:
+						info.file_name="";
 						info.file_type=EDIR;
-						for(int i=0; i<MSG_LEN && u_info.msg[i]!=NULL; i++)
+						info.file_time=tv.tv_sec;
+						for(int i=2; i<MSG_LEN && u_info.msg[i]!='\0'; i++)
 							info.file_name+=u_info.msg[i];
 						db_instance->add(info);
 						break;
 					//vfs_rmdir
 					case 4:
-						for(int i=0; i<MSG_LEN && u_info.msg[i]!=NULL; i++)
+						info.file_name="";
+						for(int i=2; i<MSG_LEN && u_info.msg[i]!='\0'; i++)
 							info.file_name+=u_info.msg[i];
 						db_instance->rm(info.file_name);
 						break;	
@@ -231,19 +253,23 @@ void *ef_kernel_conn(void *){
 						break;
 					//security_inode_create
 					case 6:
+						info.file_name="";
 						info.file_type=EREG;
-						for(int i=0; i<MSG_LEN && u_info.msg[i]!=NULL; i++)
+						info.file_time=tv.tv_sec;
+						for(int i=2; i<MSG_LEN && u_info.msg[i]!='\0'; i++)
 							info.file_name+=u_info.msg[i];
+						syslog(LOG_ERR, "info.file_name:%s", info.file_name.c_str());
 						db_instance->add(info);
 						break;
 					default:
 						break;
 				}
-				ret = sendto(skfd, nh, nh->nlmsg_len, 0, (struct sockaddr *)&daddr, sizeof(struct sockaddr_nl));
-				if(!ret){
-					close(skfd);
-					exit(-1);
-				}
+			}
+				
+			ret = sendto(skfd, nh, nh->nlmsg_len, 0, (struct sockaddr *)&daddr, sizeof(struct sockaddr_nl));
+			if(!ret){
+				close(skfd);
+				exit(-1);
 			}
 		}
 	}
@@ -251,13 +277,15 @@ void *ef_kernel_conn(void *){
 
 int main(int argc, char *argv[]){
 	start_daemon();
+	syslog(LOG_ERR, "start daemon OK");
 	if(ef_init_lockfile_to_unique()){
 		syslog(LOG_ERR, "daemon already running");
 		exit(1);
 	}
 	void *status;
-	pthread_t pid;
-	pthread_create(&pid, NULL, ef_kernel_conn, 0);
-	pthread_join(pid, &status);
+//	pthread_t pid;
+//	pthread_create(&pid, NULL, ef_kernel_conn, 0);
+//	pthread_(pid, &status);
+	ef_kernel_conn(status);
 	return 0;
 }
